@@ -10,28 +10,23 @@ mkdir -p "$out/res_ts/acc"
 mkdir -p "$out/res_ts/cdf_tpr"
 mkdir -p "$out/res_ts/cdf_fpr"
 mkdir -p "$out/res_ts/ptc"
+mkdir -p "$out/res_ts/time"
 
 mkdir -p "$out/res_nts"
 mkdir -p "$out/res_nts/acc"
 mkdir -p "$out/res_nts/ptc"
+mkdir -p "$out/res_nts/time"
 
 mkdir -p "$out/res_apk"
-mkdir -p "$out/res_apk/k6"
-mkdir -p "$out/res_apk/k11"
+mkdir -p "$out/res_apk/k3"
+mkdir -p "$out/res_apk/k5"
 
-mkdir -p "$out/res_delta"
-mkdir -p "$out/res_delta/delta_tpr"
-mkdir -p "$out/res_delta/delta_fpr"
-mkdir -p "$out/res_delta/delta_p95"
-mkdir -p "$out/res_delta/delta_p99"
-mkdir -p "$out/res_delta/delta_p99p"
 
+mkdir -p "$out/res_adp"
+mkdir -p "$out/res_seen"
 mkdir -p "$out/res_tail"
-mkdir -p "$out/res_tail/tail_tpr"
-mkdir -p "$out/res_tail/tail_fpr"
-mkdir -p "$out/res_tail/tail_p95"
-mkdir -p "$out/res_tail/tail_p99"
-mkdir -p "$out/res_tail/tail_p99p"
+
+mkdir -p "$out/res_agg"
 
 
 #### Start run experiments
@@ -59,18 +54,6 @@ cd ..
 #   echo "$line"
 #   python run_overall_timeseries.py --jobid=$line --path=$data_path --delta=0.3 --pt=0.2 --tail=0.9 --rs=42 --out='out'
 # done < "$input"
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

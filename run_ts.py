@@ -2,17 +2,19 @@ import os
 import numpy as np
 import pandas as pd
 import random
+import time
 import argparse
 
 from os import listdir
 from os.path import isfile, join
 
 from sklearn.linear_model import Ridge, LogisticRegression
-from sklearn.svm import SVR
-from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.svm import SVR, SVC
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.ensemble import GradientBoostingRegressor, GradientBoostingClassifier
 from sklearn.neural_network import MLPRegressor
+
+from imblearn.over_sampling import SMOTE 
 
 from utils_ts import fun_df_cumsum, fun_cum_vec, get_PCT, get_FPR, get_TPR, fun_cum_tpr
 
@@ -26,7 +28,7 @@ def main():
   parser.add_argument('--data_path', type=str, help='Data path')
   parser.add_argument('--jobid', type=str, default="6343048076", help='Job ID') 
   parser.add_argument('--rs', type=int, default=42, help='Random state (default: 42)')
-  parser.add_argument('--pt', type=float, default=0.2, help='Training set size (default: 0.2)')
+  parser.add_argument('--pt', type=float, default=0.04, help='Training set size (default: 0.2)')
   parser.add_argument('--tail', type=float, default=0.9, help='Latency threshold (default: 0.9)')
   parser.add_argument('--delta', type=float, default=0, help='Parameter for propensity score adjustment (default: 0)')
   parser.add_argument('--out', type=str, default='out', help='Output folder to save results (default: out)')
@@ -177,35 +179,73 @@ def main():
   list_task_norm_gap = [list_task_norm[i] for i in test_idx_gap]
   list_task_norm_test = [list_task_norm[i] for i in test_idx]
 
-  ## Begin training
+
+  ###################################################
+  ############ Wrangler training models ############# 
+  ###################################################
+
+  sm = SMOTE(0.3, random_state=rs, k_neighbors=1)
+  pt23, pt16 = 2/3, 1/6
+
+  try:
+      train_id_23 = np.random.choice(job.shape[0], int(pt23*job.shape[0]), replace=False).tolist()
+      X_train_23, Y_train_23 = job.iloc[train_id_23].to_numpy()[:,1:-1], job.iloc[train_id_23].to_numpy()[:,-1]
+      X_train_23_os, Y_train_23_os = sm.fit_resample(X_train_23, Y_train_23)
+  except:
+      np.random.seed(rs+11)
+      train_id_23 = np.random.choice(job.shape[0], int(pt23*job.shape[0]), replace=False).tolist()
+      X_train_23, Y_train_23 = job.iloc[train_id_23].to_numpy()[:,1:-1], job.iloc[train_id_23].to_numpy()[:,-1]
+      X_train_23_os, Y_train_23_os = sm.fit_resample(X_train_23, Y_train_23)    
+
+  tm_wrangler_23_start = time.time()
+  r_wrangler_23 = SVC(kernel='linear').fit(X_train_23_os, Y_train_23_os)
+  tm_wrangler_23_end = time.time()
+  tm_wrangler_23_train = tm_wrangler_23_end - tm_wrangler_23_start
+
+  r_gb_23 = GradientBoostingClassifier(n_estimators=100, random_state=rs).fit(X_train_23_os, Y_train_23_os)
+
+  try:
+      train_id_16 = np.random.choice(job.shape[0], int(pt16*job.shape[0]), replace=False).tolist()
+      X_train_16, Y_train_16 = job.iloc[train_id_16].to_numpy()[:,1:-1], job.iloc[train_id_16].to_numpy()[:,-1]
+      X_train_16_os, Y_train_16_os = sm.fit_resample(X_train_16, Y_train_16)
+  except:
+      np.random.seed(rs+11)
+      train_id_16 = np.random.choice(job.shape[0], int(pt16*job.shape[0]), replace=False).tolist()
+      X_train_16, Y_train_16 = job.iloc[train_id_16].to_numpy()[:,1:-1], job.iloc[train_id_16].to_numpy()[:,-1]
+      X_train_16_os, Y_train_16_os = sm.fit_resample(X_train_16, Y_train_16)        
+
+  tm_wrangler_16_start = time.time()
+  r_wrangler_16 = SVC(kernel='linear').fit(X_train_16_os, Y_train_16_os)
+  tm_wrangler_16_end = time.time()
+  tm_wrangler_16_train = tm_wrangler_16_end - tm_wrangler_16_start
+
+  r_gb_16 = GradientBoostingClassifier(n_estimators=100, random_state=rs).fit(X_train_16_os, Y_train_16_os)
+
+
+  ###################################################
+  ######Correlation and Sherlock training models#####
+  ###################################################
+
   X_train_up, X_test_up, Y_train_up, Y_test_up = X_train, X_test, Y_train, Y_test
   ## Train base models
-  r_ridge = Ridge(alpha=0.1, copy_X=True,fit_intercept=False).fit(X_train_up, Y_train_up)
-  r_svm = SVR(kernel='rbf').fit(X_train_up, Y_train_up)
-  r_nn = MLPRegressor(alpha=1e-5, hidden_layer_sizes=(100,50,10), random_state=rs).fit(X_train_up, Y_train_up)
-  r_rf = RandomForestRegressor(n_estimators=100, random_state=rs).fit(X_train_up, Y_train_up)
   r_gb = GradientBoostingRegressor(n_estimators=100, random_state=rs).fit(X_train_up, Y_train_up)
 
   lt_stra, lt_gap = len(list_task_norm_stra), len(list_task_norm_gap)  ## straggler/non-straggler size
   list_task_norm_gap_down = list_task_norm_gap
 
-  kl_stra_ridge, kl_stra_svm, kl_stra_nn, kl_stra_rf, kl_stra_gb, \
-  kl_stra_ipw_ridge, kl_stra_ipw_svm, kl_stra_ipw_nn, kl_stra_ipw_rf, kl_stra_ipw_gb =\
-  [], [], [], [], [], [], [], [], [], []
+  kl_stra_gb,kl_stra_ipw_gb,kl_stra_wrangler_23,kl_stra_wrangler_16,kl_stra_gb_23, kl_stra_gb_16=[],[],[],[],[],[]
 
-  kl_gap_ridge, kl_gap_svm, kl_gap_nn, kl_gap_rf, kl_gap_gb, \
-  kl_gap_ipw_ridge, kl_gap_ipw_svm, kl_gap_ipw_nn, kl_gap_ipw_rf, kl_gap_ipw_gb =\
-  [], [], [], [], [], [], [], [], [], []
+  kl_gap_gb,kl_gap_ipw_gb,kl_gap_wrangler_23,kl_gap_wrangler_16, kl_gap_gb_23, kl_gap_gb_16=[], [], [], [], [], []
 
-  fl_gap_ridge, fl_gap_svm, fl_gap_nn, fl_gap_rf, fl_gap_gb, \
-  fl_gap_ipw_ridge, fl_gap_ipw_svm, fl_gap_ipw_nn, fl_gap_ipw_rf, fl_gap_ipw_gb =\
-  [], [], [], [], [], [], [], [], [], []
+  fl_gap_gb, fl_gap_ipw_gb, fl_gap_wrangler_23, fl_gap_wrangler_16,fl_gap_gb_23, fl_gap_gb_16=[], [], [], [], [], []
 
-  for k in range(2,ts_init_size):
-    p_stra_ridge, p_stra_svm, p_stra_nn, p_stra_rf, p_stra_gb, \
-    p_stra_ipw_ridge, p_stra_ipw_svm, p_stra_ipw_nn, p_stra_ipw_rf, p_stra_ipw_gb = \
-    np.zeros(lt_stra),np.zeros(lt_stra),np.zeros(lt_stra),np.zeros(lt_stra),np.zeros(lt_stra), \
-    np.zeros(lt_stra),np.zeros(lt_stra),np.zeros(lt_stra),np.zeros(lt_stra),np.zeros(lt_stra)
+  tm_corr_list, tm_causal_list, tm_wrangler_23_list, tm_wrangler_16_list = [], [], [], []
+
+  for k in range(2,ts_init_size):  # ts_init_size
+    #print('kth row: {}'.format(k))
+    
+    p_stra_gb, p_stra_ipw_gb, p_stra_wrangler_23, p_stra_wrangler_16,p_stra_gb_23, p_stra_gb_16= \
+    np.zeros(lt_stra),np.zeros(lt_stra),np.zeros(lt_stra),np.zeros(lt_stra),np.zeros(lt_stra),np.zeros(lt_stra)
         
     tn_stra = [i.iloc[k].values for i in list_task_norm_stra]
     np_tn_stra = np.asarray(tn_stra)
@@ -216,190 +256,180 @@ def main():
     list_gap_idx = range(len(list_task_norm_gap_down))
     
     np_tn_gap = np.asarray(tn_gap)
-      
-    if len(np_tn_gap)>0 :
+    
+    if len(np_tn_gap)>0:       
+      #print('np_tn_gap:  {}'.format(np_tn_gap))
       np_tn_gap_zidx = (np.where(~np_tn_gap.any(axis=1))[0]).tolist()  ## indices of zero rows
-      if len(np_tn_gap_zidx)>0:
-
+      if len(np_tn_gap_zidx)>0:          
         tn_gap_pre = [list_task_norm_gap[i].iloc[k-1].values for i in np_tn_gap_zidx]
         np_tn_gap_pre = np.asarray(tn_gap_pre)
         
-        p_gap_ridge = r_ridge.predict(np_tn_gap_pre).tolist()
-        p_gap_svm = r_svm.predict(np_tn_gap_pre).tolist()
-        p_gap_nn = r_nn.predict(np_tn_gap_pre).tolist()
-        p_gap_rf = r_rf.predict(np_tn_gap_pre).tolist()
         p_gap_gb = r_gb.predict(np_tn_gap_pre).tolist()
+        kl_gap_gb = kl_gap_gb + p_gap_gb 
         
-        kl_gap_ridge = kl_gap_ridge + p_gap_ridge
-        kl_gap_svm = kl_gap_svm + p_gap_svm
-        kl_gap_nn = kl_gap_nn + p_gap_nn
-        kl_gap_rf = kl_gap_rf + p_gap_rf
-        kl_gap_gb = kl_gap_gb + p_gap_gb            
+        p_gap_wrangler_23 = r_wrangler_23.predict(np_tn_gap_pre).tolist()
+        p_gap_wrangler_16 = r_wrangler_16.predict(np_tn_gap_pre).tolist()
+        p_gap_gb_23 = r_gb_23.predict(np_tn_gap_pre).tolist()
+        p_gap_gb_16 = r_gb_16.predict(np_tn_gap_pre).tolist()
         
+        kl_gap_wrangler_23 = kl_gap_wrangler_23 + p_gap_wrangler_23 
+        kl_gap_wrangler_16 = kl_gap_wrangler_16 + p_gap_wrangler_16
+        kl_gap_gb_23 = kl_gap_gb_23 + p_gap_gb_23 
+        kl_gap_gb_16 = kl_gap_gb_16 + p_gap_gb_16  
+                    
         X = np.asarray(np.concatenate((X_train, np_tn_stra_nz, np_tn_gap_pre)))
         y = np.asarray([0] * X_train.shape[0] + [1] * np_tn_stra_nz.shape[0]+ [1] * np_tn_gap_pre.shape[0])
         clf = LogisticRegression(random_state=rs, solver='lbfgs').fit(X, y)
         ps = clf.predict_proba(X)
-        ps1 = ps[(X_train.shape[0]+np_tn_stra_nz.shape[0]):,0] + delta    
+        ps1 = ps[(X_train.shape[0]+np_tn_stra_nz.shape[0]):,0] + delta
         
-        p_gap_ipw_ridge = [x/y for x, y in zip(p_gap_ridge, ps1.tolist())]
-        p_gap_ipw_svm = [x/y for x, y in zip(p_gap_svm, ps1.tolist())]
-        p_gap_ipw_nn = [x/y for x, y in zip(p_gap_nn, ps1.tolist())]
-        p_gap_ipw_rf = [x/y for x, y in zip(p_gap_rf, ps1.tolist())]
         p_gap_ipw_gb = [x/y for x, y in zip(p_gap_gb, ps1.tolist())]
-        
-        kl_gap_ipw_ridge = kl_gap_ipw_ridge + p_gap_ipw_ridge 
-        kl_gap_ipw_svm = kl_gap_ipw_svm + p_gap_ipw_svm
-        kl_gap_ipw_nn = kl_gap_ipw_nn + p_gap_ipw_nn
-        kl_gap_ipw_rf = kl_gap_ipw_rf + p_gap_ipw_rf
         kl_gap_ipw_gb = kl_gap_ipw_gb + p_gap_ipw_gb
         
-        fl_gap_ridge.append(sum([1 for i in kl_gap_ridge if i>alpha])/len(kl_gap_ridge))
-        fl_gap_svm.append(sum([1 for i in kl_gap_svm if i>alpha])/len(kl_gap_svm))
-        fl_gap_nn.append(sum([1 for i in kl_gap_nn if i>alpha])/len(kl_gap_nn))
-        fl_gap_rf.append(sum([1 for i in kl_gap_rf if i>alpha])/len(kl_gap_rf))
         fl_gap_gb.append(sum([1 for i in kl_gap_gb if i>alpha])/len(kl_gap_gb))
-        fl_gap_ipw_ridge.append(sum([1 for i in kl_gap_ipw_ridge if i>alpha])/len(kl_gap_ipw_ridge))
-        fl_gap_ipw_svm.append(sum([1 for i in kl_gap_ipw_svm if i>alpha])/len(kl_gap_ipw_svm))
-        fl_gap_ipw_nn.append(sum([1 for i in kl_gap_ipw_nn if i>alpha])/len(kl_gap_ipw_nn))
-        fl_gap_ipw_rf.append(sum([1 for i in kl_gap_ipw_rf if i>alpha])/len(kl_gap_ipw_rf))
         fl_gap_ipw_gb.append(sum([1 for i in kl_gap_ipw_gb if i>alpha])/len(kl_gap_ipw_gb))
-    
-        #print('# X_train_up before:   {}'.format(X_train_up.shape))       
+        fl_gap_wrangler_23.append(sum([1 for i in kl_gap_wrangler_23 if i>alpha])/len(kl_gap_wrangler_23))
+        fl_gap_wrangler_16.append(sum([1 for i in kl_gap_wrangler_16 if i>alpha])/len(kl_gap_wrangler_16))
+        fl_gap_gb_23.append(sum([1 for i in kl_gap_gb_23 if i>alpha])/len(kl_gap_gb_23))
+        fl_gap_gb_16.append(sum([1 for i in kl_gap_gb_16 if i>alpha])/len(kl_gap_gb_16))
+        
         X_train_up = np.concatenate((X_train_up, X_test_up[np_tn_gap_zidx]))
-        #print('# X_train_up after :   {}'.format(X_train_up.shape))
-    
-        #print('# Y_train_up before:   {}'.format(Y_train_up.shape))
-        Y_train_up = np.concatenate((Y_train_up, Y_test_up[np_tn_gap_zidx]))
-        #print('# Y_train_up after :   {}'.format(Y_train_up.shape))
-    
-        list_gap_idx = [i for i in list_gap_idx if i not in np_tn_gap_zidx]
-        #print('list_gap_idx      :   {}'.format(list_gap_idx)) 
-    
+        Y_train_up = np.concatenate((Y_train_up, Y_test_up[np_tn_gap_zidx]))        
+        list_gap_idx = [i for i in list_gap_idx if i not in np_tn_gap_zidx]        
         list_task_norm_gap_down = [list_task_norm_gap_down[i] for i in list_gap_idx]
-        #print('#list_task_norm_gap_down:{}'.format(len(list_task_norm_gap_down)))
     
-        r_ridge = Ridge(alpha=0.1, copy_X=True,fit_intercept=False).fit(X_train_up, Y_train_up)
-        r_svm = SVR(kernel='rbf').fit(X_train_up, Y_train_up)
-        r_nn = MLPRegressor(alpha=1e-5, hidden_layer_sizes=(100,50,10), random_state=rs).fit(X_train_up, Y_train_up)
-        r_rf = RandomForestRegressor(n_estimators=100, random_state=rs).fit(X_train_up, Y_train_up)
         r_gb = GradientBoostingRegressor(n_estimators=100, random_state=rs).fit(X_train_up, Y_train_up)           
-      
-    p_stra_ridge[np_tn_stra_nzidx] = r_ridge.predict(np_tn_stra_nz)
-    p_stra_svm[np_tn_stra_nzidx] = r_svm.predict(np_tn_stra_nz)
-    p_stra_nn[np_tn_stra_nzidx] = r_nn.predict(np_tn_stra_nz)
-    p_stra_rf[np_tn_stra_nzidx] = r_rf.predict(np_tn_stra_nz)    
-    p_stra_gb[np_tn_stra_nzidx] = r_gb.predict(np_tn_stra_nz)    
     
+    start_time = time.time()
+    r_gb = GradientBoostingRegressor(n_estimators=10, random_state=rs).fit(X_train_up, Y_train_up)
+    p_stra_gb[np_tn_stra_nzidx] = r_gb.predict(np_tn_stra_nz) 
+    tm = time.time() - start_time
+    
+    ps_start = time.time()
     X = np.asarray(np.concatenate((X_train, np_tn_stra_nz)))
     y = np.asarray([0] * X_train.shape[0] + [1] * np_tn_stra_nz.shape[0])
     clf = LogisticRegression(random_state=rs, solver='lbfgs').fit(X, y)
     ps = clf.predict_proba(X)
     ps1 = ps[X_train.shape[0]:,0] + delta
+    tm_ps = time.time() - ps_start
     
     ## Prediction by IPW
-    p_stra_ipw_ridge[np_tn_stra_nzidx] = p_stra_ridge[np_tn_stra_nzidx]/ ps1
-    p_stra_ipw_svm[np_tn_stra_nzidx] = p_stra_svm[np_tn_stra_nzidx]/ ps1 
-    p_stra_ipw_nn[np_tn_stra_nzidx] = p_stra_nn[np_tn_stra_nzidx]/ ps1 
-    p_stra_ipw_rf[np_tn_stra_nzidx] = p_stra_rf[np_tn_stra_nzidx]/ ps1 
+    start_time_ipw = time.time()
     p_stra_ipw_gb[np_tn_stra_nzidx] = p_stra_gb[np_tn_stra_nzidx]/ ps1 
+    tm_ipw = time.time() - start_time_ipw + tm_ps + tm
+     
+    tm_corr_list.append(tm/Y_test.shape[0]*1000)
+    tm_causal_list.append(tm_ipw/Y_test.shape[0]*1000)
     
-    kl_stra_ridge.append(p_stra_ridge)    
-    kl_stra_svm.append(p_stra_svm)
-    kl_stra_nn.append(p_stra_nn)
-    kl_stra_rf.append(p_stra_rf)
+    tm_wrangler_23_pred_start = time.time()
+    p_stra_wrangler_23[np_tn_stra_nzidx] = r_wrangler_23.predict(np_tn_stra_nz)
+    tm_wrangler_23_pred_end = time.time()
+    p_stra_wrangler_16[np_tn_stra_nzidx] = r_wrangler_16.predict(np_tn_stra_nz)
+    tm_wrangler_16_pred_end = time.time()
+    
+    tm_wrangler_23 = tm_wrangler_23_pred_end-tm_wrangler_23_pred_start + tm_wrangler_16_train
+    tm_wrangler_16 = tm_wrangler_16_pred_end-tm_wrangler_23_pred_end + tm_wrangler_23_train
+    
+    tm_wrangler_23_list.append(tm_wrangler_23/Y_test.shape[0]*1000)
+    tm_wrangler_16_list.append(tm_wrangler_16/Y_test.shape[0]*1000)    
+    
+    p_stra_gb_23[np_tn_stra_nzidx] = r_gb_23.predict(np_tn_stra_nz)
+    p_stra_gb_16[np_tn_stra_nzidx] = r_gb_16.predict(np_tn_stra_nz)
+    
     kl_stra_gb.append(p_stra_gb)
-    
-    kl_stra_ipw_ridge.append(p_stra_ipw_ridge)
-    kl_stra_ipw_svm.append(p_stra_ipw_svm)
-    kl_stra_ipw_nn.append(p_stra_ipw_nn)
-    kl_stra_ipw_rf.append(p_stra_ipw_rf)
     kl_stra_ipw_gb.append(p_stra_ipw_gb)
+    
+    kl_stra_wrangler_23.append(p_stra_wrangler_23)
+    kl_stra_wrangler_16.append(p_stra_wrangler_16)
+    kl_stra_gb_23.append(p_stra_gb_23)
+    kl_stra_gb_16.append(p_stra_gb_16)    
+
+  ## Get time results dataframe
+  np_time = np.asarray([sum(tm_corr_list)/len(tm_corr_list),sum(tm_causal_list)/len(tm_causal_list),
+                          sum(tm_wrangler_16_list)/len(tm_wrangler_16_list),
+                          sum(tm_wrangler_23_list)/len(tm_wrangler_23_list)])
+  df_time = pd.DataFrame(np_time.reshape(1,-1), columns=['gb', 'gb_ipw','wrangler_23', 'wrangler_16'])
+  df_time.to_csv('{}/res_ts/time/Job{}_time.csv'.format(out,jobid))
+  print("Time:")
+  print(df_time)
 
   #### Get percentile tail results
-  PCT_ridge = get_PCT(kl_stra_ridge, y_stra_true, alpha, BI)
-  PCT_svm = get_PCT(kl_stra_svm, y_stra_true, alpha, BI)
-  PCT_nn = get_PCT(kl_stra_nn, y_stra_true, alpha, BI)
-  PCT_rf = get_PCT(kl_stra_rf, y_stra_true, alpha, BI)
-  PCT_gb = get_PCT(kl_stra_gb, y_stra_true, alpha, BI)
 
-  PCT_ipw_ridge = get_PCT(kl_stra_ipw_ridge, y_stra_true, alpha, BI)
-  PCT_ipw_svm = get_PCT(kl_stra_ipw_svm, y_stra_true, alpha, BI)
-  PCT_ipw_nn = get_PCT(kl_stra_ipw_nn, y_stra_true, alpha, BI)
-  PCT_ipw_rf = get_PCT(kl_stra_ipw_rf, y_stra_true, alpha, BI)
+  PCT_gb = get_PCT(kl_stra_gb, y_stra_true, alpha, BI)
   PCT_ipw_gb = get_PCT(kl_stra_ipw_gb, y_stra_true, alpha, BI)
 
+  PCT_wrangler_23 = get_PCT(kl_stra_wrangler_23, y_stra_true, alpha, BI)
+  PCT_wrangler_16 = get_PCT(kl_stra_wrangler_16, y_stra_true, alpha, BI)
+
+  PCT_gb_23 = get_PCT(kl_stra_gb_23, y_stra_true, alpha, BI)
+  PCT_gb_16 = get_PCT(kl_stra_gb_16, y_stra_true, alpha, BI)
+
   ## Get percentile results dataframe
-  np_pct = np.concatenate([np.asarray(PCT_ridge).reshape(1,-1),np.asarray(PCT_svm).reshape(1,-1),
-                          np.asarray(PCT_nn).reshape(1,-1),np.asarray(PCT_rf).reshape(1,-1),
-                          np.asarray(PCT_gb).reshape(1,-1),
-                          np.asarray(PCT_ipw_ridge).reshape(1,-1),np.asarray(PCT_ipw_svm).reshape(1,-1),
-                          np.asarray(PCT_ipw_nn).reshape(1,-1),np.asarray(PCT_ipw_rf).reshape(1,-1),
-                          np.asarray(PCT_ipw_gb).reshape(1,-1)])
+  np_pct = np.concatenate([np.asarray(PCT_gb).reshape(1,-1),np.asarray(PCT_ipw_gb).reshape(1,-1),
+                          np.asarray(PCT_wrangler_23).reshape(1,-1),np.asarray(PCT_wrangler_16).reshape(1,-1),
+                          np.asarray(PCT_gb_23).reshape(1,-1),np.asarray(PCT_gb_16).reshape(1,-1)])
   df_pct = pd.DataFrame(np_pct, columns=['<95','<99','99+'], 
-                        index=['ridge', 'svm', 'nn', 'rf', 'gb', 'ridge_ipw','svm_ipw','nn_ipw', 'rf_ipw','gb_ipw'])
+                        index=['gb', 'gb_ipw','wrangler_23', 'wrangler_16','gb_23', 'gb_16'])
   df_pct.to_csv('{}/res_ts/ptc/Job{}_pct.csv'.format(out,jobid))
   print("Tail percentile: ")
   print(df_pct)
 
-
-  #### Get true positive rate
-  TPR_ridge = get_TPR(kl_stra_ridge, alpha)
-  TPR_svm = get_TPR(kl_stra_svm, alpha)
-  TPR_nn = get_TPR(kl_stra_nn, alpha)
-  TPR_rf = get_TPR(kl_stra_rf, alpha)
+  ## Get true positive rate
   TPR_gb = get_TPR(kl_stra_gb, alpha)
-  TPR_ipw_ridge = get_TPR(kl_stra_ipw_ridge, alpha)
-  TPR_ipw_svm = get_TPR(kl_stra_ipw_svm, alpha)
-  TPR_ipw_nn = get_TPR(kl_stra_ipw_nn, alpha)
-  TPR_ipw_rf = get_TPR(kl_stra_ipw_rf, alpha)
   TPR_ipw_gb = get_TPR(kl_stra_ipw_gb, alpha)
+  TPR_wrangler_23 = get_TPR(kl_stra_wrangler_23, alpha)
+  TPR_wrangler_16 = get_TPR(kl_stra_wrangler_16, alpha)
+  TPR_gb_23 = get_TPR(kl_stra_gb_23, alpha)
+  TPR_gb_16 = get_TPR(kl_stra_gb_16, alpha)
 
   ## Get false positive rate
-  FPR_ridge = get_FPR(kl_gap_ridge, alpha)
-  FPR_svm = get_FPR(kl_gap_svm, alpha)
-  FPR_nn = get_FPR(kl_gap_nn, alpha)
-  FPR_rf = get_FPR(kl_gap_rf, alpha)
   FPR_gb = get_FPR(kl_gap_gb, alpha)
-  FPR_ipw_ridge = get_FPR(kl_gap_ipw_ridge, alpha)
-  FPR_ipw_svm = get_FPR(kl_gap_ipw_svm, alpha)
-  FPR_ipw_nn = get_FPR(kl_gap_ipw_nn, alpha)
-  FPR_ipw_rf = get_FPR(kl_gap_ipw_rf, alpha)
   FPR_ipw_gb = get_FPR(kl_gap_ipw_gb, alpha)
 
-  TPR_L = [TPR_ridge, TPR_svm, TPR_nn, TPR_rf, TPR_gb, TPR_ipw_ridge, TPR_ipw_svm, TPR_ipw_nn, TPR_ipw_rf, TPR_ipw_gb]
-  FPR_L = [FPR_ridge, FPR_svm, FPR_nn, FPR_rf, FPR_gb, FPR_ipw_ridge, FPR_ipw_svm, FPR_ipw_nn, FPR_ipw_rf, FPR_ipw_gb]
+  FPR_wrangler_23 = get_FPR(kl_gap_wrangler_23, alpha)
+  FPR_wrangler_16 = get_FPR(kl_gap_wrangler_16, alpha)
+  FPR_gb_23 = get_FPR(kl_gap_gb_23, alpha)
+  FPR_gb_16 = get_FPR(kl_gap_gb_16, alpha)
+
+  TPR_L = [TPR_gb, TPR_ipw_gb, TPR_wrangler_23, TPR_wrangler_16, TPR_gb_23, TPR_gb_16]
+  FPR_L = [FPR_gb, FPR_ipw_gb, FPR_wrangler_23, FPR_wrangler_16, FPR_gb_23, FPR_gb_16]
   df_acc = pd.DataFrame(list(zip(TPR_L,FPR_L)), columns=['TPR', 'FPR'],
-                       index=['ridge', 'svm', 'nn', 'rf', 'gb', 'ridge_ipw','svm_ipw','nn_ipw', 'rf_ipw','gb_ipw'])
+                       index=['gb', 'gb_ipw','wrangler_23', 'wrangler_16','gb_23', 'gb_16'])
   df_acc.to_csv('{}/res_ts/acc/Job{}_acc.csv'.format(out, jobid))
   print("Total TPR/FPR: ")
   print(df_acc)
 
   ## Get TPR CDF
-  pr_tpr_ridge = fun_cum_tpr(kl_stra_ridge, alpha)
-  pr_tpr_svm = fun_cum_tpr(kl_stra_svm, alpha)
-  pr_tpr_nn = fun_cum_tpr(kl_stra_nn, alpha)
-  pr_tpr_rf = fun_cum_tpr(kl_stra_rf, alpha)
   pr_tpr_gb = fun_cum_tpr(kl_stra_gb, alpha)
-  pr_tpr_ipw_ridge = fun_cum_tpr(kl_stra_ipw_ridge, alpha)
-  pr_tpr_ipw_svm = fun_cum_tpr(kl_stra_ipw_svm, alpha)
-  pr_tpr_ipw_nn = fun_cum_tpr(kl_stra_ipw_nn, alpha)
-  pr_tpr_ipw_rf = fun_cum_tpr(kl_stra_ipw_rf, alpha)
   pr_tpr_ipw_gb = fun_cum_tpr(kl_stra_ipw_gb, alpha)
 
-  pr_tpr = (pr_tpr_ridge+pr_tpr_svm+pr_tpr_nn+pr_tpr_rf+pr_tpr_gb)/5
-  pr_tpr_ipw = (pr_tpr_ipw_ridge+pr_tpr_ipw_svm+pr_tpr_ipw_nn+pr_tpr_ipw_rf+pr_tpr_ipw_gb)/5
-  df_cdf_tpr = pd.DataFrame(list(zip(pr_tpr,pr_tpr_ipw)), columns=['Correlation', 'Causal'])
+  pr_tpr_wrangler_23 = fun_cum_tpr(kl_stra_wrangler_23, alpha)
+  pr_tpr_wrangler_16 = fun_cum_tpr(kl_stra_wrangler_16, alpha)
+  pr_tpr_gb_23 = fun_cum_tpr(kl_stra_gb_23, alpha)
+  pr_tpr_gb_16 = fun_cum_tpr(kl_stra_gb_16, alpha)
+
+  pr_tpr = pr_tpr_gb
+  pr_tpr_ipw = pr_tpr_ipw_gb
+
+  df_cdf_tpr = pd.DataFrame(list(zip(pr_tpr, pr_tpr_ipw, pr_tpr_wrangler_23, pr_tpr_wrangler_16, pr_tpr_gb_23, pr_tpr_gb_16)), 
+                            columns=['Correlation', 'Causal', 'Wrangler_23', 'Wrangler_16', 'GB_23', 'GB_16'])
   df_cdf_tpr.to_csv('{}/res_ts/cdf_tpr/Job{}_cdf_tpr.csv'.format(out, jobid))
   print("TPR CDF: ")
   print(df_cdf_tpr)
 
-  #### Get CDF FPR
-  fl_fpr = np.array([fl_gap_ridge, fl_gap_svm, fl_gap_nn, fl_gap_rf, fl_gap_gb])
-  pr_fpr =  np.average(fl_fpr, axis=0)*100
-  fl_fpr_ipw = np.array([fl_gap_ipw_ridge, fl_gap_ipw_svm, fl_gap_ipw_nn, fl_gap_ipw_rf, fl_gap_ipw_gb])
-  pr_fpr_ipw =  np.average(fl_fpr_ipw, axis=0)*100
-  df_cdf_fpr = pd.DataFrame(list(zip(pr_fpr,pr_fpr_ipw)), columns=['Correlation', 'Causal'])
+  ## Get FPR CDF
+  pr_fpr = [x * 100 for x in fl_gap_gb]  
+  pr_fpr_ipw = [x * 100 for x in fl_gap_ipw_gb] 
+
+  pr_fpr_wrangler_23 = [x * 100 for x in fl_gap_wrangler_23] 
+  pr_fpr_wrangler_16 = [x * 100 for x in fl_gap_wrangler_16]
+
+  pr_fpr_gb_23 = [x * 100 for x in fl_gap_gb_23] 
+  pr_fpr_gb_16 = [x * 100 for x in fl_gap_gb_16]
+
+  df_cdf_fpr = pd.DataFrame(list(zip(pr_fpr,pr_fpr_ipw, pr_fpr_wrangler_23,pr_fpr_wrangler_16, pr_fpr_gb_23, pr_fpr_gb_16)), 
+                            columns=['Correlation', 'Causal', 'Wrangler_23', 'Wrangler_16', 'GB_23', 'GB_16'])
+
   df_cdf_fpr.to_csv('{}/res_ts/cdf_fpr/Job{}_cdf_fpr.csv'.format(out, jobid))
   print("FPR CDF: ")
   print(df_cdf_fpr)
