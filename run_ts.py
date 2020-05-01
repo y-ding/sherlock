@@ -186,8 +186,8 @@ def main():
   sm = SMOTE(0.3, random_state=rs, k_neighbors=1)
   pt23, pt16 = 2/3, 1/6
 
-  train_id_23 = np.random.choice(train_idx_init, int(pt23*len(train_idx_init)), replace=False).tolist() + \
-              np.random.choice(test_idx_init, int(pt23*len(test_idx_init)), replace=False).tolist()
+  train_id_23 = np.random.choice(train_idx_init, int(np.ceil(pt23*len(train_idx_init))), replace=False).tolist() + \
+              np.random.choice(test_idx_init, int(np.ceil(pt23*len(test_idx_init))), replace=False).tolist()
   X_train_23, Y_train_23 = job.iloc[train_id_23].to_numpy()[:,1:-1], job.iloc[train_id_23].to_numpy()[:,-1]
   X_train_23_os, Y_train_23_os = sm.fit_resample(X_train_23, Y_train_23)   
 
@@ -198,8 +198,8 @@ def main():
 
   r_gb_23 = GradientBoostingClassifier(n_estimators=100, random_state=rs).fit(X_train_23_os, Y_train_23_os)
 
-  train_id_16 = np.random.choice(train_idx_init, int(pt16*len(train_idx_init)), replace=False).tolist() + \
-          np.random.choice(test_idx_init, int(pt16*len(test_idx_init)), replace=False).tolist()    
+  train_id_16 = np.random.choice(train_idx_init, int(np.ceil(pt16*len(train_idx_init))), replace=False).tolist() + \
+          np.random.choice(test_idx_init, int(np.ceil(pt16*len(test_idx_init))), replace=False).tolist()  
   X_train_16, Y_train_16 = job.iloc[train_id_16].to_numpy()[:,1:-1], job.iloc[train_id_16].to_numpy()[:,-1]
   X_train_16_os, Y_train_16_os = sm.fit_resample(X_train_16, Y_train_16)       
 
