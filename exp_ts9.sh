@@ -39,7 +39,7 @@ cd ../timeseries9total
 for d in * ; do
     echo "$d"
     cd ../sherlock
-    python run_ts.py --data_path=$data_path --jobid=$d --delta=0.5 --pt=0.04 --tail=0.9 --rs=42 --out=$out
+    python run_ts.py --data_path=$data_path --jobid=$d --delta=0.3 --pt=0.04 --tail=0.9 --rs=42 --out=$out
     cd ../timeseries9total
 done
 

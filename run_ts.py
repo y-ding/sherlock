@@ -419,7 +419,7 @@ def main():
   df_cdf_fpr = pd.DataFrame(list(zip(pr_fpr,pr_fpr_ipw, pr_fpr_wrangler_23,pr_fpr_wrangler_16, pr_fpr_gb_23, pr_fpr_gb_16)), 
                             columns=['Correlation', 'Causal', 'Wrangler_23', 'Wrangler_16', 'GB_23', 'GB_16'])
 
-  df_cdf_fpr.to_csv('{}/res_ts/cdf_fpr/Job{}_cdf_fpr.csv'.format(out, jobid))
+  #df_cdf_fpr.to_csv('{}/res_ts/cdf_fpr/Job{}_cdf_fpr.csv'.format(out, jobid))
   print("FPR CDF: ")
   print(df_cdf_fpr)
 
