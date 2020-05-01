@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import random
 import time
+import sys
 import argparse
 
 from os import listdir
@@ -38,10 +39,13 @@ def main():
   path_ts   = args.data_path  
   jobid     = args.jobid
   delta     = args.delta  # Parameter to tune propensity score
-  pt        = args.pt  ## Training set size
-  tail      = args.tail # Latency threshold
-  rs        = args.rs  # Random state
-  out      = args.out  # Output folder to save results
+  pt        = args.pt     # Training set size
+  tail      = args.tail   # Latency threshold
+  rs        = args.rs     # Random state
+  out       = args.out    # Output folder to save results
+
+  if not os.path.exists(out):
+    sys.exit("No Result Folder Created!")
 
   print("data_path: {}".format(path_ts))
   print("jobid:     {}".format(jobid))
@@ -49,12 +53,7 @@ def main():
   print("pt   :     {}".format(pt))
   print("tail:      {}".format(tail))
   print("rs   :     {}".format(rs))
-  print("out :     {}".format(out))
-
-  if not os.path.exists(out):
-    os.makedirs(out)
-    os.makedirs('{}/res_ts'.format(out))
-    print(yes)
+  print("out :      {}".format(out))
 
   path_ts_file = path_ts + jobid
   files_task = [f for f in listdir(path_ts_file) if isfile(join(path_ts_file, f))]
