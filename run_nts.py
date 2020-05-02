@@ -169,7 +169,7 @@ def main():
   X_OS, Y_OS = OS.to_numpy()[:,1:-1], OS.to_numpy()[:,0]
   Y_train_cat = np.asarray([0]*X_train.shape[0]+ [1]*len(test91_idx))
   X_train_cat = np.concatenate((X_train, X_OS))
-  sm = SMOTE(0.3, random_state=rs, k_neighbors=1)
+  sm = SMOTE(0.6, random_state=rs, k_neighbors=1)
   X_train_os, Y_train_os = sm.fit_resample(X_train_cat, Y_train_cat)
   ## Wrangler
   start_time = time.time()
